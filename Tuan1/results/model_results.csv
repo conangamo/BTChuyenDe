@@ -1,5 +1,0 @@
-Model,Accuracy,Precision (Macro),Recall (Macro),F1 (Macro),Precision (Weighted),Recall (Weighted),F1 (Weighted),ROC-AUC (Macro)
-Multinomial Naïve Bayes,0.6482,0.5168,0.3309,0.3237,0.6522,0.6482,0.5627,0.7592
-Logistic Regression,0.705,0.5151,0.419,0.4315,0.6819,0.705,0.662,0.873
-Linear SVM,0.7145,0.5571,0.4974,0.5181,0.6934,0.7145,0.6976,0.8524
-Random Forest,0.6576,0.5279,0.3833,0.402,0.6292,0.6576,0.5991,0.8369

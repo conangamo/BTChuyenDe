@@ -3,6 +3,7 @@
 # Sentiment Analysis trên SemEval 2014 Restaurant Dataset
 # Mô hình: Naive Bayes, Logistic Regression (+ baseline: Linear SVM, Random Forest)
 # Evaluation: F1, Accuracy, ROC-AUC, Precision, Recall
+# Sử dụng dữ liệu đã tiền xử lý + augmentation từ data_preprocessing.py
 # =============================================================================
 
 import os
@@ -14,10 +15,11 @@ sys.stdout.reconfigure(encoding='utf-8')
 sys.stderr.reconfigure(encoding='utf-8')
 import numpy as np
 import pandas as pd
+import matplotlib
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import seaborn as sns
 
-from sklearn.model_selection import train_test_split
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.preprocessing import LabelEncoder, label_binarize
 from sklearn.metrics import (
@@ -35,103 +37,99 @@ from sklearn.ensemble import RandomForestClassifier
 warnings.filterwarnings('ignore')
 
 # =============================================================================
-# 1. ĐỌC DỮ LIỆU
+# 1. ĐỌC DỮ LIỆU ĐÃ TIỀN XỬ LÝ
 # =============================================================================
 print("=" * 70)
-print("1. ĐỌC DỮ LIỆU")
+print("1. ĐỌC DỮ LIỆU ĐÃ TIỀN XỬ LÝ (results/processed_data/)")
 print("=" * 70)
 
-# Đường dẫn dataset (đã download từ Kaggle)
-DATA_DIR = os.path.join(
-    "datasets", "charitarth",
-    "semeval-2014-task-4-aspectbasedsentimentanalysis",
-    "versions", "4"
-)
-RESULTS_DIR = "results"
+# Thư mục chứa dữ liệu đã xử lý (output từ data_preprocessing.py)
+BASE_DIR      = os.path.dirname(os.path.abspath(__file__))   # .../bai1/
+TUAN1_DIR     = os.path.dirname(BASE_DIR)                    # .../Tuan1/
+PROCESSED_DIR = os.path.join(TUAN1_DIR, "results", "processed_data")
+RESULTS_DIR   = os.path.join(TUAN1_DIR, "results", "bai1")
 os.makedirs(RESULTS_DIR, exist_ok=True)
 
-# Đọc file CSV training
-train_file = os.path.join(DATA_DIR, "Restaurants_Train_v2.csv")
-df = pd.read_csv(train_file)
 
-print(f"Số mẫu ban đầu: {len(df)}")
-print(f"Các cột: {df.columns.tolist()}")
-print(f"\nPhân bố nhãn:")
-print(df['polarity'].value_counts())
+# Đọc 3 tập đã chia sẵn
+df_train = pd.read_csv(os.path.join(PROCESSED_DIR, "train.csv"))
+df_val   = pd.read_csv(os.path.join(PROCESSED_DIR, "val.csv"))
+df_test  = pd.read_csv(os.path.join(PROCESSED_DIR, "test.csv"))
+
+print(f"Train (goc + augmented) : {len(df_train):>6} mau")
+print(f"Validation (goc)        : {len(df_val):>6} mau")
+print(f"Test       (goc)        : {len(df_test):>6} mau")
+
+print(f"\nPhan bo nhan — Train:")
+print(df_train['polarity'].value_counts().to_string())
+print(f"\nPhan bo nhan — Validation:")
+print(df_val['polarity'].value_counts().to_string())
+print(f"\nPhan bo nhan — Test:")
+print(df_test['polarity'].value_counts().to_string())
 
 # =============================================================================
-# 2. TIỀN XỬ LÝ DỮ LIỆU
+# 2. CHUẨN BỊ FEATURES VÀ NHÃN
 # =============================================================================
 print("\n" + "=" * 70)
-print("2. TIỀN XỬ LÝ DỮ LIỆU")
+print("2. CHUẨN BỊ FEATURES VÀ NHÃN")
 print("=" * 70)
 
-# Loại bỏ các hàng bị thiếu dữ liệu
-df = df.dropna(subset=['Sentence', 'polarity'])
+# Dùng cột 'text' đã làm sạch sẵn (Sentence_clean [SEP] Aspect_clean)
+X_train_raw = df_train['text'].fillna('')
+X_val_raw   = df_val['text'].fillna('')
+X_test_raw  = df_test['text'].fillna('')
 
-# Gộp Sentence + Aspect Term để tạo feature text (giữ ngữ cảnh aspect)
-df['text'] = df['Sentence'].astype(str) + " " + df['Aspect Term'].astype(str)
-
-# Chuẩn hóa text cơ bản (lowercase)
-df['text'] = df['text'].str.lower().str.strip()
-
-print(f"Số mẫu sau tiền xử lý: {len(df)}")
-
-# Encode nhãn polarity
+# Encode nhãn — fit chỉ trên tập train (3 nhãn: negative, neutral, positive)
 label_encoder = LabelEncoder()
-df['label'] = label_encoder.fit_transform(df['polarity'])
+label_encoder.fit(df_train['polarity'])
 class_names = label_encoder.classes_
-n_classes = len(class_names)
+n_classes   = len(class_names)
 
-print(f"Các nhãn: {class_names.tolist()}")
-print(f"Số lớp: {n_classes}")
+y_train = label_encoder.transform(df_train['polarity'])
+y_val   = label_encoder.transform(df_val['polarity'])
+y_test  = label_encoder.transform(df_test['polarity'])
 
-# =============================================================================
-# 3. CHIA TẬP TRAIN / TEST
-# =============================================================================
-print("\n" + "=" * 70)
-print("3. CHIA TẬP TRAIN / TEST (80% - 20%)")
-print("=" * 70)
+print(f"Cac nhan : {class_names.tolist()}")
+print(f"So lop   : {n_classes}")
+print(f"\nX_train  : {len(X_train_raw)} mau")
+print(f"X_val    : {len(X_val_raw)} mau")
+print(f"X_test   : {len(X_test_raw)} mau")
 
-X = df['text']
-y = df['label']
+# Phân bố nhãn 3 tập
+fig, axes = plt.subplots(1, 3, figsize=(18, 5))
+fig.suptitle("Phan bo du lieu SemEval 2014 Restaurant\n(Train/Val/Test sau tien xu ly & augmentation)",
+             fontsize=14, fontweight='bold')
 
-X_train, X_test, y_train, y_test = train_test_split(
-    X, y, test_size=0.2, random_state=42, stratify=y
-)
+colors_map = {'negative': '#E74C6F', 'neutral': '#4A90D9', 'positive': '#50B86C'}
 
-print(f"Train: {len(X_train)} mẫu")
-print(f"Test:  {len(X_test)} mẫu")
-
-# Phân bố nhãn Train/Test
-fig, axes = plt.subplots(1, 2, figsize=(14, 5))
-fig.suptitle("Phân bố dữ liệu SemEval 2014 Restaurant", fontsize=16, fontweight='bold')
-
-colors = ['#4A90D9', '#50B86C', '#F5A623', '#E74C6F']
-
-for ax, data, title in [
-    (axes[0], y_train, "Phân bố nhãn - Tập Train"),
-    (axes[1], y_test,  "Phân bố nhãn - Tập Test")
-]:
-    counts = pd.Series(data).map(lambda x: class_names[x]).value_counts()
-    counts = counts.reindex(class_names)
-    bars = ax.bar(counts.index, counts.values, color=colors[:n_classes], edgecolor='white')
-    ax.set_title(title, fontsize=13, fontweight='bold')
-    ax.set_ylabel("Số lượng")
+for ax, (df_part, title) in zip(axes, [
+    (df_train[df_train['is_augmented'] == False], "Train (goc, 2503 mau)"),
+    (df_val,  "Validation (GIU NGUYEN)"),
+    (df_test, "Test (GIU NGUYEN)"),
+]):
+    counts = df_part['polarity'].value_counts().reindex(class_names, fill_value=0)
+    bars = ax.bar(counts.index,
+                  counts.values,
+                  color=[colors_map.get(l, '#999') for l in counts.index],
+                  edgecolor='white', linewidth=1.2)
+    ax.set_title(title, fontsize=12, fontweight='bold')
+    ax.set_ylabel("So luong")
     for bar, val in zip(bars, counts.values):
-        ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 5,
+        ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 3,
                 str(val), ha='center', va='bottom', fontweight='bold')
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
 
 plt.tight_layout()
 plt.savefig(os.path.join(RESULTS_DIR, "label_distribution.png"), dpi=150, bbox_inches='tight')
 plt.close()
-print("✅ Đã lưu biểu đồ phân bố nhãn → results/label_distribution.png")
+print("\n[OK] Da luu bieu do phan bo nhan → results/bai1/label_distribution.png")
 
 # =============================================================================
-# 4. TRÍCH XUẤT ĐẶC TRƯNG (TF-IDF)
+# 3. TRÍCH XUẤT ĐẶC TRƯNG (TF-IDF)
 # =============================================================================
 print("\n" + "=" * 70)
-print("4. TRÍCH XUẤT ĐẶC TRƯNG (TF-IDF)")
+print("3. TRICH XUAT DAC TRUNG (TF-IDF)")
 print("=" * 70)
 
 tfidf = TfidfVectorizer(
@@ -142,24 +140,28 @@ tfidf = TfidfVectorizer(
     sublinear_tf=True
 )
 
-X_train_tfidf = tfidf.fit_transform(X_train)
-X_test_tfidf = tfidf.transform(X_test)
+# fit CHI tren Train, transform ca 3 tap
+X_train_tfidf = tfidf.fit_transform(X_train_raw)
+X_val_tfidf   = tfidf.transform(X_val_raw)
+X_test_tfidf  = tfidf.transform(X_test_raw)
 
-print(f"Số features TF-IDF: {X_train_tfidf.shape[1]}")
-print(f"Shape Train: {X_train_tfidf.shape}")
-print(f"Shape Test:  {X_test_tfidf.shape}")
+print(f"So features TF-IDF : {X_train_tfidf.shape[1]}")
+print(f"Shape Train        : {X_train_tfidf.shape}")
+print(f"Shape Validation   : {X_val_tfidf.shape}")
+print(f"Shape Test         : {X_test_tfidf.shape}")
 
 # =============================================================================
-# 5. XÂY DỰNG VÀ HUẤN LUYỆN CÁC MÔ HÌNH
+# 4. XÂY DỰNG VÀ HUẤN LUYỆN CÁC MÔ HÌNH
 # =============================================================================
 print("\n" + "=" * 70)
-print("5. XÂY DỰNG VÀ HUẤN LUYỆN CÁC MÔ HÌNH")
+print("4. XAY DUNG VA HUAN LUYEN CAC MO HINH")
 print("=" * 70)
+print("   Train tren tap Train (augmented), danh gia tren tap Validation & Test")
 
 # Định nghĩa các mô hình
 models = {
     # --- Mô hình chính (yêu cầu đề bài) ---
-    "Multinomial Naïve Bayes": MultinomialNB(alpha=1.0),
+    "Multinomial Naive Bayes": MultinomialNB(alpha=1.0),
     "Logistic Regression": LogisticRegression(
         max_iter=1000, C=1.0, solver='lbfgs', random_state=42
     ),
@@ -170,27 +172,32 @@ models = {
     ),
 }
 
-# Dictionary lưu kết quả
+# Dictionary lưu kết quả (đánh giá trên Test)
 results = {}
 
 for name, model in models.items():
     print(f"\n--- Training: {name} ---")
     model.fit(X_train_tfidf, y_train)
+
+    # ── Đánh giá trên Validation
+    y_val_pred = model.predict(X_val_tfidf)
+    val_acc = accuracy_score(y_val, y_val_pred)
+    val_f1  = f1_score(y_val, y_val_pred, average='macro', zero_division=0)
+    print(f"  [VAL]  Accuracy={val_acc:.4f}  F1(macro)={val_f1:.4f}")
+
+    # ── Đánh giá trên Test
     y_pred = model.predict(X_test_tfidf)
 
-    # Tính các metrics
-    acc = accuracy_score(y_test, y_pred)
+    acc       = accuracy_score(y_test, y_pred)
     prec_macro = precision_score(y_test, y_pred, average='macro', zero_division=0)
-    rec_macro = recall_score(y_test, y_pred, average='macro', zero_division=0)
-    f1_macro = f1_score(y_test, y_pred, average='macro', zero_division=0)
-    prec_w = precision_score(y_test, y_pred, average='weighted', zero_division=0)
-    rec_w = recall_score(y_test, y_pred, average='weighted', zero_division=0)
-    f1_w = f1_score(y_test, y_pred, average='weighted', zero_division=0)
+    rec_macro  = recall_score(y_test, y_pred, average='macro', zero_division=0)
+    f1_macro   = f1_score(y_test, y_pred, average='macro', zero_division=0)
+    prec_w     = precision_score(y_test, y_pred, average='weighted', zero_division=0)
+    rec_w      = recall_score(y_test, y_pred, average='weighted', zero_division=0)
+    f1_w       = f1_score(y_test, y_pred, average='weighted', zero_division=0)
 
-    # Tính ROC-AUC (cần probability scores)
+    # Tính ROC-AUC
     y_test_bin = label_binarize(y_test, classes=range(n_classes))
-
-    # Lấy probability/decision scores cho ROC
     if hasattr(model, 'predict_proba'):
         y_score = model.predict_proba(X_test_tfidf)
     elif hasattr(model, 'decision_function'):
@@ -207,6 +214,8 @@ for name, model in models.items():
         'model': model,
         'y_pred': y_pred,
         'y_score': y_score,
+        'Val Accuracy': round(val_acc, 4),
+        'Val F1 (Macro)': round(val_f1, 4),
         'Accuracy': round(acc, 4),
         'Precision (Macro)': round(prec_macro, 4),
         'Recall (Macro)': round(rec_macro, 4),
@@ -217,24 +226,21 @@ for name, model in models.items():
         'ROC-AUC (Macro)': round(roc_macro, 4),
     }
 
-    # In classification report
-    print(f"  Accuracy:          {acc:.4f}")
-    print(f"  Precision (Macro): {prec_macro:.4f}")
-    print(f"  Recall (Macro):    {rec_macro:.4f}")
-    print(f"  F1 (Macro):        {f1_macro:.4f}")
-    print(f"  ROC-AUC (Macro):   {roc_macro:.4f}")
-    print(f"\n  Classification Report:")
+    # In classification report trên Test
+    print(f"  [TEST] Accuracy={acc:.4f}  Precision={prec_macro:.4f}  Recall={rec_macro:.4f}  F1={f1_macro:.4f}  ROC-AUC={roc_macro:.4f}")
+    print(f"\n  Classification Report (Test):")
     print(classification_report(y_test, y_pred, target_names=class_names, zero_division=0))
 
 # =============================================================================
-# 6. ĐÁNH GIÁ VÀ SO SÁNH MÔ HÌNH
+# 5. ĐÁNH GIÁ VÀ SO SÁNH MÔ HÌNH
 # =============================================================================
 print("\n" + "=" * 70)
-print("6. ĐÁNH GIÁ VÀ SO SÁNH MÔ HÌNH")
+print("5. DANH GIA VA SO SANH MO HINH")
 print("=" * 70)
 
 # Tạo bảng kết quả
 metrics_cols = [
+    'Val Accuracy', 'Val F1 (Macro)',
     'Accuracy', 'Precision (Macro)', 'Recall (Macro)', 'F1 (Macro)',
     'Precision (Weighted)', 'Recall (Weighted)', 'F1 (Weighted)', 'ROC-AUC (Macro)'
 ]
@@ -243,12 +249,12 @@ df_results = pd.DataFrame(
 ).T
 df_results.index.name = 'Model'
 
-print("\n📊 BẢNG KẾT QUẢ TỔNG HỢP:")
+print("\nBANG KET QUA TONG HOP (Test Set):")
 print(df_results.to_string())
 
 # Lưu CSV
 df_results.to_csv(os.path.join(RESULTS_DIR, "model_results.csv"))
-print(f"\n✅ Đã lưu kết quả → results/model_results.csv")
+print(f"\n[OK] Da luu ket qua → results/bai1/model_results.csv")
 
 # --- 6.1 Biểu đồ so sánh các metrics chính ---
 compare_metrics = ['Accuracy', 'F1 (Macro)', 'Precision (Macro)', 'Recall (Macro)', 'ROC-AUC (Macro)']
@@ -341,29 +347,30 @@ print("✅ Đã lưu ROC curves → results/roc_curves.png")
 # 7. KẾT LUẬN
 # =============================================================================
 print("\n" + "=" * 70)
-print("7. KẾT LUẬN")
+print("7. KET LUAN")
 print("=" * 70)
 
-# Tìm model tốt nhất theo từng metric
-print("\n🏆 Model tốt nhất theo từng metric:")
-for metric in compare_metrics:
+# Tìm model tốt nhất theo từng metric (Test)
+test_metrics = ['Accuracy', 'F1 (Macro)', 'Precision (Macro)', 'Recall (Macro)', 'ROC-AUC (Macro)']
+print("\nModel tot nhat theo tung metric (tren Test):")
+for metric in test_metrics:
     best_model = df_results[metric].idxmax()
-    best_val = df_results[metric].max()
+    best_val   = df_results[metric].max()
     print(f"  {metric:25s}: {best_model} ({best_val:.4f})")
 
 # So sánh Naive Bayes vs Logistic Regression (2 model chính)
-print("\n📊 SO SÁNH 2 MÔ HÌNH CHÍNH:")
+print("\nSO SANH 2 MO HINH CHINH (tren Test):")
 print("-" * 50)
-nb_results = df_results.loc["Multinomial Naïve Bayes"]
+nb_results = df_results.loc["Multinomial Naive Bayes"]
 lr_results = df_results.loc["Logistic Regression"]
 
 comparison_df = pd.DataFrame({
-    'Naïve Bayes': nb_results[compare_metrics],
-    'Logistic Regression': lr_results[compare_metrics],
-    'Chênh lệch': lr_results[compare_metrics] - nb_results[compare_metrics]
+    'Naive Bayes': nb_results[test_metrics],
+    'Logistic Regression': lr_results[test_metrics],
+    'Chenh lech': lr_results[test_metrics] - nb_results[test_metrics]
 })
 print(comparison_df.to_string())
 
 print("\n" + "=" * 70)
-print("✅ HOÀN TẤT! Tất cả kết quả đã được lưu trong thư mục 'results/'")
+print("HOAN TAT! Tat ca ket qua da duoc luu trong thu muc 'results/bai1/'")
 print("=" * 70)
