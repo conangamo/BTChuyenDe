@@ -1,9 +1,9 @@
 Model,Accuracy,F1 (Macro),Precision (Macro),Recall (Macro),ROC-AUC (Macro),Type
-MLP,0.6667,0.4975,0.6345,0.4841,0.806,Deep Learning
-BiLSTM,0.6872,0.6252,0.6164,0.6458,0.7996,Deep Learning
-TextCNN,0.6927,0.6175,0.6117,0.6256,0.8191,Deep Learning
-BiLSTM+Attention,0.6816,0.6061,0.6223,0.6215,0.8141,Deep Learning
-DL Ensemble,0.6834,0.6151,0.6072,0.6314,0.821,Deep Learning
+MLP,0.6667,0.4555,0.6767,0.4565,0.7901,Deep Learning
+BiLSTM,0.6592,0.6013,0.6021,0.6201,0.807,Deep Learning
+TextCNN,0.7076,0.6354,0.6308,0.6451,0.83,Deep Learning
+BiLSTM+Attention,0.6499,0.591,0.5826,0.6128,0.8159,Deep Learning
+DL Ensemble,0.6946,0.6327,0.6233,0.6507,0.8298,Deep Learning
 Multinomial Naive Bayes,0.6983,0.5361,0.6729,0.5144,0.8202,ML Baseline
 Logistic Regression,0.7244,0.6035,0.6753,0.5812,0.8355,ML Baseline
 Linear SVM,0.7151,0.6154,0.6354,0.6036,0.8184,ML Baseline

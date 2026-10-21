@@ -24,13 +24,17 @@ import warnings
 import shutil
 import subprocess
 
-# Auto-dispatch: TensorFlow on Windows requires Python <= 3.12 (Python 3.11 is configured)
-if sys.version_info >= (3, 13):
-    py_cmd = shutil.which("py")
-    if py_cmd:
-        print(f"[INFO] Python {sys.version.split()[0]} is not supported by TensorFlow. Auto-delegating to Python 3.11...")
-        proc = subprocess.run([py_cmd, "-3.11", os.path.abspath(__file__)] + sys.argv[1:])
-        sys.exit(proc.returncode)
+# Auto-dispatch: Fallback to Python 3.11 if TensorFlow is not installed in current environment
+try:
+    import tensorflow as tf
+except ImportError:
+    if sys.version_info >= (3, 13):
+        py_cmd = shutil.which("py")
+        if py_cmd:
+            print(f"[INFO] TensorFlow not found on Python {sys.version.split()[0]}. Delegating to Python 3.11...")
+            proc = subprocess.run([py_cmd, "-3.11", os.path.abspath(__file__)] + sys.argv[1:])
+            sys.exit(proc.returncode)
+    raise
 
 sys.stdout.reconfigure(encoding='utf-8')
 sys.stderr.reconfigure(encoding='utf-8')
