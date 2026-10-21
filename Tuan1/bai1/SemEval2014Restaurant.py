@@ -21,7 +21,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 
 from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.preprocessing import LabelEncoder, label_binarize
+from sklearn.preprocessing import LabelEncoder, label_binarize, MinMaxScaler
 from sklearn.metrics import (
     accuracy_score, precision_score, recall_score, f1_score,
     roc_auc_score, roc_curve, auc,
@@ -126,29 +126,86 @@ plt.close()
 print("\n[OK] Da luu bieu do phan bo nhan → results/bai1/label_distribution.png")
 
 # =============================================================================
-# 3. TRÍCH XUẤT ĐẶC TRƯNG (TF-IDF)
+# 3. TRÍCH XUẤT ĐẶC TRƯNG (TF-IDF + SENTIMENT LEXICON — CÙNG INPUT VỚI BÀI 2)
 # =============================================================================
 print("\n" + "=" * 70)
-print("3. TRICH XUAT DAC TRUNG (TF-IDF)")
+print("3. TRICH XUAT DAC TRUNG (TF-IDF + LEXICON - CUNG INPUT VOI BAI 2)")
 print("=" * 70)
 
+# ── 3a. TF-IDF (Unigram + Bigram, 8000 features giống bài 2) ─────────────────
 tfidf = TfidfVectorizer(
-    max_features=10000,
+    max_features=8000,
     ngram_range=(1, 2),      # Unigram + Bigram
     min_df=2,
     max_df=0.95,
     sublinear_tf=True
 )
 
-# fit CHI tren Train, transform ca 3 tap
-X_train_tfidf = tfidf.fit_transform(X_train_raw)
-X_val_tfidf   = tfidf.transform(X_val_raw)
-X_test_tfidf  = tfidf.transform(X_test_raw)
+X_train_tfidf = tfidf.fit_transform(X_train_raw).toarray().astype(np.float32)
+X_val_tfidf   = tfidf.transform(X_val_raw).toarray().astype(np.float32)
+X_test_tfidf  = tfidf.transform(X_test_raw).toarray().astype(np.float32)
 
-print(f"So features TF-IDF : {X_train_tfidf.shape[1]}")
-print(f"Shape Train        : {X_train_tfidf.shape}")
-print(f"Shape Validation   : {X_val_tfidf.shape}")
-print(f"Shape Test         : {X_test_tfidf.shape}")
+print(f"  [3a] TF-IDF features   : {X_train_tfidf.shape[1]}")
+
+# ── 3b. Sentiment Lexicon Features (hand-crafted, giống bài 2) ───────────────
+POS_WORDS = {
+    'great','good','excellent','amazing','wonderful','fantastic','superb',
+    'perfect','delicious','tasty','fresh','friendly','helpful','nice','love',
+    'loved','best','outstanding','brilliant','enjoyable','pleasure','recommend',
+    'recommended','satisfied','impressive','quality','pleasant','cozy','warm',
+    'comfortable','scrumptious','flavorful','yummy','fabulous','terrific',
+    'exceptional','attentive','generous','affordable','reasonable','worth',
+    'clean','quick','fast','authentic','fresh','tender','juicy','crispy',
+}
+NEG_WORDS = {
+    'bad','terrible','awful','horrible','poor','worst','disgusting','mediocre',
+    'slow','cold','rude','unfriendly','expensive','overpriced','disappointed',
+    'disappointing','bland','tasteless','overcooked','undercooked','noisy',
+    'dirty','greasy','salty','dry','tough','stale','small','tiny','cramped',
+    'waited','wait','long','never','not','no','nothing','wrong','problem',
+    'unfortunately','avoid','horrible','lacking','boring','rushed','ignored',
+    'fake','generic','average','mediocre','inedible','flavorless','soggy',
+}
+NEG_WORD_SET = {'not','no','never','neither','nor','without','lack','lacking'}
+
+def lexicon_features(texts):
+    feats = []
+    for text in texts:
+        words = str(text).lower().split()
+        n = max(len(words), 1)
+        n_pos    = sum(1 for w in words if w in POS_WORDS)
+        n_neg    = sum(1 for w in words if w in NEG_WORDS)
+        n_negate = sum(1 for w in words if w in NEG_WORD_SET)
+        feats.append([
+            n_pos, n_neg, n_negate,
+            n_pos / n, n_neg / n,
+            (n_pos - n_neg) / n,    # net sentiment score
+            n_negate / n,           # negation density
+            n,                      # doc length
+        ])
+    return np.array(feats, dtype=np.float32)
+
+X_train_lex = lexicon_features(X_train_raw)
+X_val_lex   = lexicon_features(X_val_raw)
+X_test_lex  = lexicon_features(X_test_raw)
+
+# Scaler giúp features không âm, tương thích hoàn toàn với MultinomialNB
+scaler = MinMaxScaler()
+X_train_lex_s = scaler.fit_transform(X_train_lex)
+X_val_lex_s   = scaler.transform(X_val_lex)
+X_test_lex_s  = scaler.transform(X_test_lex)
+
+print(f"  [3b] Lexicon features  : {X_train_lex_s.shape[1]}")
+
+# ── 3c. Kết hợp TF-IDF + Lexicon (Input đồng nhất với MLP của Bài 2) ──────────
+X_train_comb = np.hstack([X_train_tfidf, X_train_lex_s])
+X_val_comb   = np.hstack([X_val_tfidf,   X_val_lex_s])
+X_test_comb  = np.hstack([X_test_tfidf,  X_test_lex_s])
+
+print(f"  [3c] Tong features     : {X_train_comb.shape[1]}")
+print(f"       Shape Train       : {X_train_comb.shape}")
+print(f"       Shape Validation  : {X_val_comb.shape}")
+print(f"       Shape Test        : {X_test_comb.shape}")
 
 # =============================================================================
 # 4. XÂY DỰNG VÀ HUẤN LUYỆN CÁC MÔ HÌNH
@@ -177,16 +234,16 @@ results = {}
 
 for name, model in models.items():
     print(f"\n--- Training: {name} ---")
-    model.fit(X_train_tfidf, y_train)
+    model.fit(X_train_comb, y_train)
 
     # ── Đánh giá trên Validation
-    y_val_pred = model.predict(X_val_tfidf)
+    y_val_pred = model.predict(X_val_comb)
     val_acc = accuracy_score(y_val, y_val_pred)
     val_f1  = f1_score(y_val, y_val_pred, average='macro', zero_division=0)
     print(f"  [VAL]  Accuracy={val_acc:.4f}  F1(macro)={val_f1:.4f}")
 
     # ── Đánh giá trên Test
-    y_pred = model.predict(X_test_tfidf)
+    y_pred = model.predict(X_test_comb)
 
     acc       = accuracy_score(y_test, y_pred)
     prec_macro = precision_score(y_test, y_pred, average='macro', zero_division=0)
@@ -199,9 +256,9 @@ for name, model in models.items():
     # Tính ROC-AUC
     y_test_bin = label_binarize(y_test, classes=range(n_classes))
     if hasattr(model, 'predict_proba'):
-        y_score = model.predict_proba(X_test_tfidf)
+        y_score = model.predict_proba(X_test_comb)
     elif hasattr(model, 'decision_function'):
-        y_score = model.decision_function(X_test_tfidf)
+        y_score = model.decision_function(X_test_comb)
     else:
         y_score = label_binarize(y_pred, classes=range(n_classes))
 
