@@ -21,6 +21,16 @@
 import os
 import sys
 import warnings
+import shutil
+import subprocess
+
+# Auto-dispatch: TensorFlow on Windows requires Python <= 3.12 (Python 3.11 is configured)
+if sys.version_info >= (3, 13):
+    py_cmd = shutil.which("py")
+    if py_cmd:
+        print(f"[INFO] Python {sys.version.split()[0]} is not supported by TensorFlow. Auto-delegating to Python 3.11...")
+        proc = subprocess.run([py_cmd, "-3.11", os.path.abspath(__file__)] + sys.argv[1:])
+        sys.exit(proc.returncode)
 
 sys.stdout.reconfigure(encoding='utf-8')
 sys.stderr.reconfigure(encoding='utf-8')
@@ -55,7 +65,7 @@ from tensorflow.keras.regularizers import l2
 # ─────────────────────────────────────────────────────────────────────────────
 RANDOM_SEED  = 42
 BATCH_SIZE   = 64
-MAX_EPOCHS   = 30
+MAX_EPOCHS   = 15
 VOCAB_SIZE   = 15000   # so tu toi da trong vocabulary
 MAX_SEQ_LEN  = 100     # do dai toi da mot chuoi
 EMBED_DIM    = 128     # embedding dimension
@@ -241,10 +251,10 @@ def get_metrics(name, y_true, y_pred, y_score=None):
     }
 
 CALLBACKS = [
-    EarlyStopping(monitor='val_loss', patience=5,
+    EarlyStopping(monitor='val_loss', patience=4,
                   restore_best_weights=True, verbose=0),
     ReduceLROnPlateau(monitor='val_loss', factor=0.5,
-                      patience=3, min_lr=1e-5, verbose=0),
+                      patience=2, min_lr=1e-5, verbose=0),
 ]
 
 dl_results   = {}   # {name: metrics dict}
@@ -306,8 +316,7 @@ seq_in = Input(shape=(MAX_SEQ_LEN,), name='bilstm_in')
 emb    = layers.Embedding(vocab_actual, EMBED_DIM, mask_zero=True)(seq_in)
 emb    = layers.SpatialDropout1D(0.3)(emb)
 bi1    = layers.Bidirectional(
-    layers.LSTM(LSTM_UNITS, return_sequences=True,
-                dropout=0.2, recurrent_dropout=0.2)
+    layers.LSTM(LSTM_UNITS, return_sequences=True, dropout=0.2)
 )(emb)
 bi2    = layers.Bidirectional(
     layers.LSTM(LSTM_UNITS // 2, dropout=0.2)
@@ -386,28 +395,39 @@ print(f"  Test: Acc={r['Accuracy']:.4f}  F1={r['F1 (Macro)']:.4f}  ROC-AUC={r['R
 print("\n--- [4d] BiLSTM + Self-Attention ---")
 
 class SelfAttention(layers.Layer):
-    """Bahdanau-style self-attention layer."""
+    """Bahdanau-style self-attention layer with full mask support."""
     def __init__(self, units, **kwargs):
         super().__init__(**kwargs)
+        self.units = units
+        self.supports_masking = True
         self.W = layers.Dense(units, use_bias=False)
         self.V = layers.Dense(1,     use_bias=False)
 
-    def call(self, hidden):                                  # (batch, seq, dim)
-        score   = self.V(tf.nn.tanh(self.W(hidden)))         # (batch, seq, 1)
-        weights = tf.nn.softmax(score, axis=1)               # (batch, seq, 1)
-        context = tf.reduce_sum(weights * hidden, axis=1)    # (batch, dim)
+    def compute_mask(self, inputs, mask=None):
+        return None
+
+    def call(self, hidden, mask=None):                                  # (batch, seq, dim)
+        score = self.V(tf.nn.tanh(self.W(hidden)))                     # (batch, seq, 1)
+        if mask is not None:
+            mask_expanded = tf.cast(mask[:, :, tf.newaxis], tf.float32)
+            score += (1.0 - mask_expanded) * -1e9
+        weights = tf.nn.softmax(score, axis=1)                          # (batch, seq, 1)
+        if mask is not None:
+            weights = weights * mask_expanded
+            weights = weights / (tf.reduce_sum(weights, axis=1, keepdims=True) + 1e-9)
+        context = tf.reduce_sum(weights * hidden, axis=1)               # (batch, dim)
         return context
 
     def get_config(self):
         cfg = super().get_config()
+        cfg.update({'units': self.units})
         return cfg
 
 seq_in3 = Input(shape=(MAX_SEQ_LEN,), name='attn_in')
 emb3    = layers.Embedding(vocab_actual, EMBED_DIM, mask_zero=True)(seq_in3)
 emb3    = layers.SpatialDropout1D(0.3)(emb3)
 bi_seq  = layers.Bidirectional(
-    layers.LSTM(LSTM_UNITS, return_sequences=True,
-                dropout=0.2, recurrent_dropout=0.2)
+    layers.LSTM(LSTM_UNITS, return_sequences=True, dropout=0.2)
 )(emb3)
 ctx     = SelfAttention(LSTM_UNITS * 2, name='self_attn')(bi_seq)
 x       = layers.Dense(128, activation='relu')(ctx)
@@ -571,8 +591,8 @@ for ax, metric in zip(axes, compare_cols):
     ax.set_xlabel('Score')
     if os.path.exists(BAI1_CSV):
         ax.axhline(y=n_dl - 0.5, color='gray', linestyle='--', alpha=0.5, linewidth=1)
-        ax.text(0.01, n_dl - 0.3, 'ML', fontsize=8, color='gray')
-        ax.text(0.01, n_dl + 0.1, 'DL', fontsize=8, color='gray')
+        ax.text(0.01, n_dl - 0.3, 'DL', fontsize=8, color='gray', fontweight='bold')
+        ax.text(0.01, n_dl + 0.1, 'ML', fontsize=8, color='gray', fontweight='bold')
     for bar, val in zip(bars, vals):
         ax.text(bar.get_width() + 0.01, bar.get_y() + bar.get_height() / 2,
                 f'{val:.3f}', va='center', fontsize=8, fontweight='bold')
