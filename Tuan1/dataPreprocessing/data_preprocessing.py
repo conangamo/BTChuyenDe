@@ -37,12 +37,13 @@ TEST_RATIO    = 0.15   # 15% cua toan bo du lieu dung lam Test
 
 AUG_PER_SAMPLE = 2     # So ban augmented sinh ra cho moi mau Train goc
 
-DATA_DIR = os.path.join(
-    "datasets", "charitarth",
+BASE_DIR      = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DATA_DIR      = os.path.join(
+    BASE_DIR, "datasets", "charitarth",
     "semeval-2014-task-4-aspectbasedsentimentanalysis",
     "versions", "4"
 )
-RESULTS_DIR   = "results"
+RESULTS_DIR   = os.path.join(BASE_DIR, "results")
 PROCESSED_DIR = os.path.join(RESULTS_DIR, "processed_data")
 os.makedirs(PROCESSED_DIR, exist_ok=True)
 os.makedirs(RESULTS_DIR, exist_ok=True)
